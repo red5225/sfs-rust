@@ -10,15 +10,8 @@ const ISP: f64 = 285.0;
 const G0: f64 = 9.80665;
 
 struct Rocket {
-    pos: Vec2,
-    vel: Vec2,
-    angle: f32,
-    fuel: f64,
-    throttle: f64,
-    time: f64,
-    crashed: bool,
-    landed: bool,
-    max_altitude: f64,
+    pos: Vec2, vel: Vec2, angle: f32, fuel: f64, throttle: f64,
+    time: f64, crashed: bool, landed: bool, max_altitude: f64,
 }
 impl Rocket {
     fn new() -> Self {
@@ -36,24 +29,21 @@ impl Rocket {
         let density = (-(self.altitude().max(0.0) / 8_500.0)).exp() as f32;
         let speed = self.vel.length();
         let drag = -self.vel * (0.5 * 1.225 * density * 0.42 * 1.8 * speed / self.mass() as f32);
-        let mut acceleration = down * gravity as f32 + drag;
+        let mut acceleration = down * gravity + drag;
         if self.throttle > 0.0 && self.fuel > 0.0 {
             let direction = vec2(self.angle.sin(), self.angle.cos());
             let thrust = ENGINE_THRUST * self.throttle;
             acceleration += direction * (thrust / self.mass()) as f32;
             self.fuel = (self.fuel - thrust / (ISP * G0) * dt).max(0.0);
         }
-        // Semi-implicit Euler with bounded substeps keeps the fast launch stable.
         self.vel += acceleration * dt as f32;
         self.pos += self.vel * dt as f32;
         self.time += dt;
         self.max_altitude = self.max_altitude.max(self.altitude());
-        let altitude = self.altitude();
-        if altitude <= 0.0 {
+        if self.altitude() <= 0.0 {
             let radial_speed = self.vel.dot(self.pos.normalize_or_zero());
-            if radial_speed < -12.0 || self.vel.length() > 18.0 {
-                self.crashed = true;
-            } else {
+            if radial_speed < -12.0 || self.vel.length() > 18.0 { self.crashed = true; }
+            else {
                 self.landed = true;
                 self.vel = Vec2::ZERO;
                 self.pos = self.pos.normalize_or_zero() * (PLANET_RADIUS as f32 + 3.0);
@@ -61,12 +51,10 @@ impl Rocket {
         }
     }
 }
-
 fn window_conf() -> Conf {
     Conf { window_title: "SFS Rust — Flight Test".into(), window_width: 1280,
         window_height: 800, high_dpi: true, ..Default::default() }
 }
-
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut rocket = Rocket::new();
@@ -92,7 +80,8 @@ async fn main() {
             for _ in 0..steps { rocket.step(dt); }
         } else { rocket.throttle = 0.0; }
 
-        let scale = (1.0 / (rocket.pos.length().max(PLANET_RADIUS as f32) * 0.0012)).clamp(0.00035, 0.0012);
+        // Keep the rocket visible while gradually zooming out as altitude grows.
+        let scale = (500.0 / rocket.pos.length().max(PLANET_RADIUS as f32)).clamp(0.08, 0.42);
         let camera = Camera2D {
             target: rocket.pos,
             zoom: vec2(2.0 * scale / screen_width(), -2.0 * scale / screen_height()),
@@ -100,8 +89,6 @@ async fn main() {
         };
         set_camera(&camera);
         clear_background(Color::from_rgba(5, 9, 20, 255));
-
-        // Procedural star field anchored to world coordinates.
         for i in 0..180 {
             let x = ((i * 7919 % 4000) as f32 - 2000.0) * 2.0;
             let y = ((i * 104729 % 4000) as f32 - 2000.0) * 2.0;
@@ -109,8 +96,7 @@ async fn main() {
         }
         draw_circle(0.0, 0.0, PLANET_RADIUS as f32, Color::from_rgba(34, 91, 135, 255));
         draw_circle(0.0, 0.0, PLANET_RADIUS as f32 - 18.0, Color::from_rgba(39, 119, 91, 255));
-        draw_circle_lines(0.0, 0.0, PLANET_RADIUS as f32, 8.0, SKYBLUE);
-        // Rocket body and exhaust.
+        draw_circle_lines(0.0, 0.0, PLANET_RADIUS as f32, 8.0 / scale, SKYBLUE);
         let dir = vec2(rocket.angle.sin(), rocket.angle.cos());
         let side = vec2(dir.y, -dir.x);
         let nose = rocket.pos + dir * 25.0;
@@ -121,21 +107,20 @@ async fn main() {
             draw_triangle(rocket.pos - dir * 15.0, flame + side * 5.0, flame - side * 5.0, ORANGE);
         }
         draw_triangle(nose, left, right, LIGHTGRAY);
-        draw_line(rocket.pos.x, rocket.pos.y, rocket.pos.x + dir.x * 35.0, rocket.pos.y + dir.y * 35.0, 2.0, WHITE);
         set_default_camera();
 
         let alt = rocket.altitude();
         let speed = rocket.vel.length() as f64;
         let gravity = G * PLANET_MASS / (rocket.pos.length() as f64).powi(2);
         let orbit_speed = (G * PLANET_MASS / rocket.pos.length() as f64).sqrt();
-        draw_rectangle(16.0, 16.0, 330.0, 154.0, Color::from_rgba(8, 14, 28, 220));
+        draw_rectangle(16.0, 16.0, 330.0, 174.0, Color::from_rgba(8, 14, 28, 220));
         draw_text("SFS RUST  |  FLIGHT TEST", 30.0, 42.0, 22.0, SKYBLUE);
         draw_text(&format!("ALTITUDE  {:>9.1} m", alt.max(0.0)), 30.0, 70.0, 20.0, WHITE);
         draw_text(&format!("VELOCITY  {:>9.1} m/s", speed), 30.0, 96.0, 20.0, WHITE);
         draw_text(&format!("FUEL      {:>8.1} kg", rocket.fuel), 30.0, 122.0, 20.0, WHITE);
         draw_text(&format!("GRAVITY   {:>8.2} m/s²", gravity), 30.0, 148.0, 20.0, WHITE);
         draw_text(&format!("ORBIT SPEED {:>7.1} m/s", orbit_speed), 30.0, 174.0, 20.0, WHITE);
-        draw_rectangle(16.0, screen_height() - 56.0, 560.0, 40.0, Color::from_rgba(8, 14, 28, 220));
+        draw_rectangle(16.0, screen_height() - 56.0, 620.0, 40.0, Color::from_rgba(8, 14, 28, 220));
         draw_text("SPACE: THRUST   A/D: ROTATE   P: PAUSE   R: RESET   1-4: TIME WARP", 28.0, screen_height() - 30.0, 17.0, WHITE);
         if show_help {
             draw_rectangle(screen_width()-300.0, 16.0, 284.0, 100.0, Color::from_rgba(8, 14, 28, 220));
